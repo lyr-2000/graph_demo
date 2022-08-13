@@ -1,0 +1,14 @@
+{
+  "name": "test",
+  "version": "1.0.0",
+  "description": "1",
+  "main": "1",
+  "scripts": {
+    "test": "aa"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "sync-request": "^6.1.0"
+  }
+}
