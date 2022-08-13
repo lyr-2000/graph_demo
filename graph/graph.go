@@ -89,12 +89,12 @@ func (u *Graph) GetBeginNode() *Node {
 	return u._dfsBeginNode
 }
 
-func (u *Graph) GetNextGroupNode(curNode *Node) []*Node {
+func (u *Graph) GetNextGroupCanPassEdges(curNode *Node) []*Edge {
 	nextNodesEdges := u.outEdges[curNode.NodeId]
-	var list []*Node
+	var list []*Edge
 	for _, v := range nextNodesEdges {
 		if v.Cond {
-			list = append(list, v.To)
+			list = append(list, v)
 		}
 	}
 	return list
@@ -110,12 +110,12 @@ type Context = context.Context
 
 // type CallbackFunc func() error
 type CallbackRequest struct {
-	OnStart         []func(Context, *Graph, *Node) error //这个可能没啥用，先放着
-	OnBegin         []func(Context, *Graph, *Node) error //当前请求的开始节点
+	OnStart         []func(Context, *Graph, *Node, *Edge) error //这个可能没啥用，先放着
+	OnBegin         []func(Context, *Graph, *Node, *Edge) error //当前请求的开始节点
 	OnPanic         []func(Context, *Graph, *Node, error) error
-	OnVisitNode     []func(Context, *Graph, *Node) error // 遍历到当前节点
-	OnReachDestNode []func(Context, *Graph, *Node) error //遍历到当前的停止节点
-	OnReachEndNode  []func(Context, *Graph, *Node) error //遍历到 end节点
+	OnVisitNode     []func(Context, *Graph, *Node, *Edge) error // 遍历到当前节点
+	OnReachDestNode []func(Context, *Graph, *Node, *Edge) error //遍历到当前的停止节点
+	OnReachEndNode  []func(Context, *Graph, *Node, *Edge) error //遍历到 end节点
 }
 
 func IsStartNode(u *Node) bool {
@@ -184,7 +184,7 @@ func travelNode0(c context.Context, g *Graph, callback *CallbackRequest) (err er
 	onStartLoop:
 		for _, onStart := range callback.OnStart {
 
-			if err := onStart(c, g, beginNode); err != nil {
+			if err := onStart(c, g, beginNode, nil); err != nil {
 				switch err {
 				case Done: //不做任何事情
 					break onStartLoop
@@ -199,7 +199,7 @@ func travelNode0(c context.Context, g *Graph, callback *CallbackRequest) (err er
 	if IsEndNode(beginNode) {
 	onEndLoop:
 		for _, cb := range callback.OnReachEndNode {
-			if err := cb(c, g, beginNode); err != nil {
+			if err := cb(c, g, beginNode, nil); err != nil {
 				switch err {
 				case Done: //不做任何事情
 					break onEndLoop
@@ -215,7 +215,7 @@ func travelNode0(c context.Context, g *Graph, callback *CallbackRequest) (err er
 	}
 onBeginLoop:
 	for _, onbegin := range callback.OnBegin {
-		if err := onbegin(c, g, beginNode); err != nil {
+		if err := onbegin(c, g, beginNode, nil); err != nil {
 			switch err {
 			case Done: //不做任何事情
 				break onBeginLoop
@@ -275,12 +275,12 @@ func dfs(c context.Context, g *Graph, n *Node, step uint8 /*最大256层*/, call
 		g.SetVisitedNode(n, false) //remove mark visited
 		g._dfsTrace = g._dfsTrace[:traceLen-1]
 	}()
-	nextGroups := g.GetNextGroupNode(n)
+	nextGroups := g.GetNextGroupCanPassEdges(n)
 RunNextNode:
-	for _, vnextNode := range nextGroups { //如果 是 排他网关，只会数组长度为1， 如果是并行网关，将返回所有符合条件的后续节点
-		if IsStartNode(vnextNode) {
+	for _, vnextEdge := range nextGroups { //如果 是 排他网关，只会数组长度为1， 如果是并行网关，将返回所有符合条件的后续节点
+		if IsStartNode(vnextEdge.To) {
 			for _, cb := range callback.OnStart { // end node
-				if err := cb(c, g, vnextNode); err != nil {
+				if err := cb(c, g, vnextEdge.To, vnextEdge); err != nil {
 					switch err {
 					case Done:
 						break
@@ -294,10 +294,10 @@ RunNextNode:
 			//已经是结束节点了，直接返回
 			continue RunNextNode
 		}
-		if IsEndNode(vnextNode) {
+		if IsEndNode(vnextEdge.To) {
 
 			for _, cb := range callback.OnReachEndNode { // end node
-				if err := cb(c, g, vnextNode); err != nil {
+				if err := cb(c, g, vnextEdge.To, vnextEdge); err != nil {
 					switch err {
 					case Done:
 						break
@@ -313,11 +313,11 @@ RunNextNode:
 			//已经是结束节点了，直接返回
 			continue RunNextNode
 		}
-		if IsReachDestNode(vnextNode) {
+		if IsReachDestNode(vnextEdge.To) {
 		callback_destNodes:
 			for _, cb := range callback.OnReachDestNode { // stop node
 
-				if err := cb(c, g, vnextNode); err != nil {
+				if err := cb(c, g, vnextEdge.To, vnextEdge); err != nil {
 					switch err {
 					case Done: //不做任何事情
 						break callback_destNodes
@@ -335,7 +335,7 @@ RunNextNode:
 		//先序
 	Loop_applyVisited:
 		for _, onVisitedFunc := range callback.OnVisitNode {
-			if err := onVisitedFunc(c, g, vnextNode); err != nil {
+			if err := onVisitedFunc(c, g, vnextEdge.To, vnextEdge); err != nil {
 				switch err {
 				case Done:
 					break Loop_applyVisited
@@ -348,7 +348,7 @@ RunNextNode:
 		}
 
 		//后序
-		if err = dfs(c, g, vnextNode, step+1, callback); err != nil {
+		if err = dfs(c, g, vnextEdge.To, step+1, callback); err != nil {
 			return err
 		}
 	}
