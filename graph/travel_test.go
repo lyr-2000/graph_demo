@@ -38,13 +38,15 @@ f --> d
 
 func Test_build_graph_byEdges(t *testing.T) {
 	var s = `start-->nodea
-   nodea-->js
+nodea-->js
 nodea-->user1
 nodea-->user3
 start-->user2
 start-->a
+user1-->start
 a-->b
 b-->c
+# c-->start
 c-->end
 # b-->start
 `
@@ -80,6 +82,61 @@ c-->end
 		return nil
 	})
 	node := g.FindNodeByNodeId("start")
+	err := TravelNode(context.TODO(), g, node, req)
+	if err != nil {
+		t.Logf("err = %+v\n", err)
+	}
+}
+
+func Test_build_graph_user_to_start(t *testing.T) {
+	var s = `user1-->a
+a-->js
+js-->start
+`
+	//  user1 用户审核，到 a节点，a调用脚本，之后再回到 start 节点 [排他网关的时候]
+	edges := readEdge_forDebug(s)
+	for _, v := range edges {
+		if v.To.NodeId == "start" {
+			v.To.Type = "start"
+		}
+		if v.To.NodeId == "end" {
+			//结束
+			v.To.Type = "end"
+		}
+		if strings.HasPrefix(v.To.NodeId, "user") {
+			//审核节点
+			v.To.Type = "userTask"
+		}
+		if strings.HasPrefix(v.To.NodeId, "js") {
+			//脚本节点
+			v.To.Type = "js"
+		}
+	}
+	// t.Logf("edges = %+v\n", edges)
+	g := buildGraphByEdges_debug(edges)
+	// g := buildGraph_debug_by_Expr(s)
+	req := new(CallbackRequest)
+	req.OnVisitNode = append(req.OnVisitNode, func(c Context, g *Graph, n *Node) error {
+		t.Logf("current Node is %+v\n", n.NodeId)
+		return nil
+	})
+	req.OnReachDestNode = append(req.OnReachDestNode, func(c Context, g *Graph, n *Node) error {
+		t.Logf("reach destination node := %+v\n", n.NodeId)
+		return nil
+	})
+	req.OnReachEndNode = append(req.OnReachEndNode, func(c Context, g *Graph, n *Node) error {
+		t.Logf("end !!%+v\n", n.NodeId)
+		return nil
+	})
+	req.OnStart = append(req.OnStart, func(c Context, g *Graph, n *Node) error {
+		t.Logf("startNode !!%+v\n", n.NodeId)
+		return nil
+	})
+	req.OnBegin = append(req.OnBegin, func(c Context, g *Graph, n *Node) error {
+		t.Logf("onBegin =%+v\n", n.NodeId)
+		return nil
+	})
+	node := g.FindNodeByNodeId("user1")
 	err := TravelNode(context.TODO(), g, node, req)
 	if err != nil {
 		t.Logf("err = %+v\n", err)

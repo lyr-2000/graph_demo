@@ -135,18 +135,17 @@ func IsReachDestNode(u *Node) bool {
 }
 func TravelNode(c Context, g *Graph, begin *Node, callback *CallbackRequest) error {
 	g._dfsBeginNode = begin
-	err := travelNode0(c, g, callback)
-	if err == nil {
-		return nil
+	if err := travelNode0(c, g, callback); err != nil {
+		switch err {
+		case SkipCurrentNodeCallback:
+			//
+		case Done:
+		default:
+			return err
+		}
 	}
-	switch err {
-	case SkipCurrentNodeCallback:
-		//
-	case Done:
-	default:
-		return err
-	}
-	return err
+
+	return nil
 }
 
 //获取 深度遍历时候的 trace
@@ -277,26 +276,23 @@ func dfs(c context.Context, g *Graph, n *Node, step uint8 /*最大256层*/, call
 		g._dfsTrace = g._dfsTrace[:traceLen-1]
 	}()
 	nextGroups := g.GetNextGroupNode(n)
-	// RunNextNode:
+RunNextNode:
 	for _, vnextNode := range nextGroups { //如果 是 排他网关，只会数组长度为1， 如果是并行网关，将返回所有符合条件的后续节点
-
-		if IsReachDestNode(vnextNode) {
-		callback_destNodes:
-			for _, cb := range callback.OnReachDestNode { // stop node
-
+		if IsStartNode(vnextNode) {
+			for _, cb := range callback.OnStart { // end node
 				if err := cb(c, g, vnextNode); err != nil {
 					switch err {
-					case Done: //不做任何事情
-						break callback_destNodes
-					case SkipCurrentNodeCallback: //跳过所有的回调
-						break callback_destNodes
+					case Done:
+						break
+					case SkipCurrentNodeCallback:
+						break
 					default:
 						return err
 					}
 				}
 			}
-
-			// continue RunNextNode
+			//已经是结束节点了，直接返回
+			continue RunNextNode
 		}
 		if IsEndNode(vnextNode) {
 
@@ -315,8 +311,27 @@ func dfs(c context.Context, g *Graph, n *Node, step uint8 /*最大256层*/, call
 			}
 
 			//已经是结束节点了，直接返回
-			return nil
+			continue RunNextNode
 		}
+		if IsReachDestNode(vnextNode) {
+		callback_destNodes:
+			for _, cb := range callback.OnReachDestNode { // stop node
+
+				if err := cb(c, g, vnextNode); err != nil {
+					switch err {
+					case Done: //不做任何事情
+						break callback_destNodes
+					case SkipCurrentNodeCallback: //跳过所有的回调
+						break callback_destNodes
+					default:
+						return err
+					}
+				}
+			}
+			continue RunNextNode // 审核节点可以是环形结构，比如不同意直接 回到开始节点，所以这里要提前返回
+			// continue RunNextNode
+		}
+
 		//先序
 	Loop_applyVisited:
 		for _, onVisitedFunc := range callback.OnVisitNode {
