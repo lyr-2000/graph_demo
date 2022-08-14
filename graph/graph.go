@@ -58,8 +58,11 @@ func (g *Graph) FindNodeByNodeId(nodeid string) *Node {
 	enode := g.allNodes[nodeid]
 	return enode
 }
-func (u *Graph) GetPreviousEdges(n *Node) []*Edge {
+func (u *Graph) GetAllInEdges(n *Node) []*Edge {
 	return u.inEdges[n.NodeId]
+}
+func (u *Graph) GetAllOutEdges(n *Node) []*Edge {
+	return u.outEdges[n.NodeId]
 }
 
 // func EnsureNoCycle(g *Graph, beginNode *Node) error {
@@ -89,7 +92,7 @@ func (u *Graph) GetBeginNode() *Node {
 	return u._dfsBeginNode
 }
 
-func (u *Graph) GetNextGroupCanPassEdges(curNode *Node) []*Edge {
+func (u *Graph) GetCanPassOutEdges(curNode *Node) []*Edge {
 	nextNodesEdges := u.outEdges[curNode.NodeId]
 	var list []*Edge
 	for _, v := range nextNodesEdges {
@@ -131,7 +134,7 @@ func IsEndNode(u *Node) bool {
 //reach the destination
 func IsReachDestNode(u *Node) bool {
 	//如果是审核节点，就需要停下来进行审核 【 如果 是end节点，也要停下来，  然后最后判断整个流程是否结束】
-	return u.Type == "end" || u.Type == "userTask" //用户审核 ，或者是某个特殊的网关，需要卡在这
+	return u.Type == "end" || u.Type == "userTask" || u.Type == "receiveTask" //用户审核 ，或者是某个特殊的网关，需要卡在这
 }
 func TravelNode(c Context, g *Graph, begin *Node, callback *CallbackRequest) error {
 	g._dfsBeginNode = begin
@@ -139,7 +142,7 @@ func TravelNode(c Context, g *Graph, begin *Node, callback *CallbackRequest) err
 		switch err {
 		case SkipCurrentNodeCallback:
 			//
-		case Done:
+		case SkipTheBranch:
 		default:
 			return err
 		}
@@ -186,7 +189,7 @@ func travelNode0(c context.Context, g *Graph, callback *CallbackRequest) (err er
 
 			if err := onStart(c, g, beginNode, nil); err != nil {
 				switch err {
-				case Done: //不做任何事情
+				case SkipTheBranch: //不做任何事情
 					break onStartLoop
 				case SkipCurrentNodeCallback: //跳过所有的回调
 					break onStartLoop
@@ -201,7 +204,7 @@ func travelNode0(c context.Context, g *Graph, callback *CallbackRequest) (err er
 		for _, cb := range callback.OnReachEndNode {
 			if err := cb(c, g, beginNode, nil); err != nil {
 				switch err {
-				case Done: //不做任何事情
+				case SkipTheBranch: //不做任何事情
 					break onEndLoop
 				case SkipCurrentNodeCallback: //跳过所有的回调
 					break onEndLoop
@@ -211,13 +214,13 @@ func travelNode0(c context.Context, g *Graph, callback *CallbackRequest) (err er
 			}
 		}
 		//开始就是 endNode ,就直接结束
-		return Done
+		return SkipTheBranch
 	}
 onBeginLoop:
 	for _, onbegin := range callback.OnBegin {
 		if err := onbegin(c, g, beginNode, nil); err != nil {
 			switch err {
-			case Done: //不做任何事情
+			case SkipTheBranch: //不做任何事情
 				break onBeginLoop
 			case SkipCurrentNodeCallback: //跳过所有的回调
 				break onBeginLoop
@@ -249,13 +252,13 @@ func (g *Graph) IsVisited(n *Node) bool {
 var (
 	CycleNodeError          = fmt.Errorf("cycleNode 环状结构,流程异常")
 	StackOverflow           = fmt.Errorf("stackoverflow")
-	Done                    = fmt.Errorf("done")
+	SkipTheBranch           = fmt.Errorf("skip the branch")       //跳过某个分支，不要再继续往下跑
 	SkipCurrentNodeCallback = fmt.Errorf("skip current callback") //到达了停止节点，例如审核节点，当前的路径就停止了，等待下一轮请求
 
 	MaxTravelStack uint8 = 100
 )
 
-func dfs(c context.Context, g *Graph, n *Node, step uint8 /*最大256层*/, callback *CallbackRequest) (err error) {
+func dfs(c context.Context, g *Graph, n *Node, step uint8 /*最大256层*/, callback *CallbackRequest) error {
 	if n == nil {
 		return nil
 	}
@@ -275,15 +278,15 @@ func dfs(c context.Context, g *Graph, n *Node, step uint8 /*最大256层*/, call
 		g.SetVisitedNode(n, false) //remove mark visited
 		g._dfsTrace = g._dfsTrace[:traceLen-1]
 	}()
-	nextGroups := g.GetNextGroupCanPassEdges(n)
-RunNextNode:
+	nextGroups := g.GetCanPassOutEdges(n)
+RunNextBranch: //遍历节点后面的所有分支
 	for _, vnextEdge := range nextGroups { //如果 是 排他网关，只会数组长度为1， 如果是并行网关，将返回所有符合条件的后续节点
 		if IsStartNode(vnextEdge.To) {
 			for _, cb := range callback.OnStart { // end node
 				if err := cb(c, g, vnextEdge.To, vnextEdge); err != nil {
 					switch err {
-					case Done:
-						break
+					case SkipTheBranch:
+						continue RunNextBranch
 					case SkipCurrentNodeCallback:
 						break
 					default:
@@ -292,15 +295,15 @@ RunNextNode:
 				}
 			}
 			//已经是结束节点了，直接返回
-			continue RunNextNode
+			continue RunNextBranch
 		}
 		if IsEndNode(vnextEdge.To) {
 
 			for _, cb := range callback.OnReachEndNode { // end node
 				if err := cb(c, g, vnextEdge.To, vnextEdge); err != nil {
 					switch err {
-					case Done:
-						break
+					case SkipTheBranch:
+						continue RunNextBranch
 					case SkipCurrentNodeCallback:
 						break
 					default:
@@ -311,7 +314,7 @@ RunNextNode:
 			}
 
 			//已经是结束节点了，直接返回
-			continue RunNextNode
+			continue RunNextBranch
 		}
 		if IsReachDestNode(vnextEdge.To) {
 		callback_destNodes:
@@ -319,8 +322,8 @@ RunNextNode:
 
 				if err := cb(c, g, vnextEdge.To, vnextEdge); err != nil {
 					switch err {
-					case Done: //不做任何事情
-						break callback_destNodes
+					case SkipTheBranch: //不做任何事情
+						continue RunNextBranch
 					case SkipCurrentNodeCallback: //跳过所有的回调
 						break callback_destNodes
 					default:
@@ -328,19 +331,19 @@ RunNextNode:
 					}
 				}
 			}
-			continue RunNextNode // 审核节点可以是环形结构，比如不同意直接 回到开始节点，所以这里要提前返回
+			continue RunNextBranch // 审核节点可以是环形结构，比如不同意直接 回到开始节点，所以这里要提前返回
 			// continue RunNextNode
 		}
 
 		//先序
-	Loop_applyVisited:
+	Loop_VisitedNode:
 		for _, onVisitedFunc := range callback.OnVisitNode {
 			if err := onVisitedFunc(c, g, vnextEdge.To, vnextEdge); err != nil {
 				switch err {
-				case Done:
-					break Loop_applyVisited
+				case SkipTheBranch:
+					continue RunNextBranch
 				case SkipCurrentNodeCallback:
-					break Loop_applyVisited
+					break Loop_VisitedNode
 				default:
 					return err
 				}
@@ -348,7 +351,7 @@ RunNextNode:
 		}
 
 		//后序
-		if err = dfs(c, g, vnextEdge.To, step+1, callback); err != nil {
+		if err := dfs(c, g, vnextEdge.To, step+1, callback); err != nil {
 			return err
 		}
 	}
