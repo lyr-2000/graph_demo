@@ -3,7 +3,6 @@ package graph
 import (
 	"bufio"
 	"bytes"
-	"log"
 	"strings"
 )
 
@@ -20,7 +19,7 @@ func buildGraphByEdges_debug(edges []*Edge) *Graph {
 		linkEdge := &Edge{From: from, To: to, Cond: true}
 		g.outEdges[from.NodeId] = append(g.outEdges[from.NodeId], linkEdge)
 		g.inEdges[to.NodeId] = append(g.outEdges[from.NodeId], linkEdge)
-
+		//记录出边和入边
 	}
 	return g
 }
@@ -40,15 +39,19 @@ func readEdge_forDebug(s string) []*Edge {
 		if err != nil {
 			break
 		}
-		two := strings.Split(line, "-->")
-		if len(two) != 2 {
-			log.Fatalln("cannot parse your expr")
-		}
-		a_ := strings.Trim(two[0], "\n")
-		b_ := strings.Trim(two[1], "\n")
-		if strings.HasPrefix(a_, "#") {
+		if strings.Contains(line, "#") {
 			continue
 		}
+		two := strings.Split(line, "-->")
+		if len(two) != 2 {
+			// log.Fatalln("cannot parse your expr")
+			continue
+		}
+		a_ := strings.Trim(two[0], "\n ")
+		b_ := strings.Trim(two[1], "\n ")
+		// if strings.HasPrefix(a_, "#") {
+		// 	continue
+		// }
 		var a, b *Node
 		var ok bool
 		a, ok = nodes[a_]

@@ -94,9 +94,14 @@ a-->js
 js-->b
 js-->userTask1
 b-->start
+userTask1-->xyz
+# userTask是审核节点,所有要先审核,后面的流程要卡在这不动
+
 `
 	//  user1 用户审核，到 a节点，a调用脚本，之后再回到 start 节点 [排他网关的时候]
 	edges := readEdge_forDebug(s)
+
+	t.Logf("all edges = [%+v]\n", edges)
 	for _, v := range edges {
 		if v.To.NodeId == "start" {
 			v.To.Type = "start"
