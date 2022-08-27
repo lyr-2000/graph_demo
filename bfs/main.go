@@ -31,7 +31,6 @@ type ExitSignals struct {
 }
 
 func runNode(c context.Context, ch chan *RunSignals, g Graph, nodeName []string) int {
-	// *taskCnt += len(nodeName)
 	taskCnt := 0
 	for _, v := range nodeName {
 		n, exists := g[v]
@@ -50,8 +49,10 @@ func runNode(c context.Context, ch chan *RunSignals, g Graph, nodeName []string)
 func eventLoop(c context.Context, ch chan *ExitSignals, u Graph, _startNode string) string {
 	// go eventLoop(c, ch, u, _startNode)
 	signalQueue := make(chan *RunSignals, 1)
+	//可以传入更多的信息，这里是最简化版本
 	taskCnt := runNode(c, signalQueue, u, []string{_startNode})
 	_notice := false
+	//因为 eventLoop 是单线程执行的，可以不用加锁
 	var send = func(x *ExitSignals) {
 		if _notice {
 			return
@@ -65,6 +66,7 @@ func eventLoop(c context.Context, ch chan *ExitSignals, u Graph, _startNode stri
 		if signal.Done {
 			taskCnt--
 		}
+		//如果节点执行err了，就不继续执行该分支
 		if signal.Err != nil {
 			send(&ExitSignals{
 				Err: signal.Err,
