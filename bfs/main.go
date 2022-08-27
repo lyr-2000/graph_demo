@@ -40,6 +40,7 @@ func runNode(c context.Context, ch chan *RunSignals, g Graph, nodeName []string)
 			go func() {
 				//这里不能panic,一定要保证节点不能panic,不然状态无法维护
 				n.Func(c, ch)
+				//这里可以包装一个 接口，不一定要传入 一个 channel,而是一个包装了channel的接口
 			}()
 		}
 	}
@@ -102,8 +103,9 @@ var graph = Graph{
 	"start": Node{
 		Func: func(c context.Context, ch chan *RunSignals) string {
 			// defer wg.Done()
+			time.Sleep(time.Millisecond * 300)
 			ch <- &RunSignals{
-				Msg: "start[进入耗时操作,请提前返回]!",
+				Msg: "start[进入耗时操作,通知前端返回]!",
 			}
 			defer func() {
 				ch <- &RunSignals{
@@ -159,16 +161,14 @@ var graph = Graph{
 
 func main() {
 
-	log.Println("hello-world")
-	// msgs := make(chan string, 1)
 	go func() { //模拟一次 http请求
 		// c, cancel := context.WithCancel(context.TODO())
 		ch := make(chan *ExitSignals, 1)
 		RunGraph(context.TODO(), ch, graph, "start")
 		select {
-		case msg := <-ch:
+		case msg := <-ch: //监听协程传回的响应结果
 			log.Printf("请求响应 %#v", msg)
-		case <-time.After(time.Second * 8):
+		case <-time.After(time.Second * 8): //如果节点执行还是超时，就直接返回
 			log.Println("请求超时！！！")
 		}
 	}()
