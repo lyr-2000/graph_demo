@@ -1,10 +1,8 @@
 package main
 
 import (
-	"aa/bfs/xcontainer"
 	"context"
 	"log"
-	"sync"
 	"time"
 )
 
@@ -12,134 +10,147 @@ import (
 // 	"bfs"
 // )
 // 队列结构
-var q xcontainer.Queue = xcontainer.New()
+// var q xcontainer.Queue = xcontainer.New()
 
 type Node struct {
-	Func func(c context.Context, cancelFunc func()) string
+	Func func(c context.Context, ch chan *RunSignals) string
 	_x   string
 }
 type Graph map[string]Node
 
 type RunSignals struct {
-	Msg  chan string   //用来通知前端的信息
-	Done chan []string //下一圈节点的 Nodeid
+	Msg      string //用来通知前端的信息
+	Err      error
+	NextNode []string //下一圈节点的 Nodeid
+	Done     bool
 }
 
-func MapSize(u *sync.Map) int {
-	cnt := 0
-	u.Range(func(k interface{}, v interface{}) bool {
-		cnt++
-		return true
-	})
-	return cnt
-}
-func _runNode(c context.Context, cancel func(), u Graph, nodeId string) {
-	x, ok := u[nodeId]
-	if ok {
-		x.Func(c, cancel)
-	}
+type ExitSignals struct {
+	Err error
+	Msg string
 }
 
-var (
-	mu sync.Mutex
-)
-
-func eventLoop(c context.Context, cancelFunc func(), u Graph) error {
-	mu.Lock()
-	cnt := q.Len()
-	watchTask := make(chan struct{}, cnt)
-	func() {
-		if cnt <= 0 {
-			return
-		}
-		// for v, _ := <- range watchTask {
-		for i := 0; i < cnt; i++ {
-			hnodeId, _ := q.Front().Value.(string)
-			q.Remove()
+func runNode(c context.Context, ch chan *RunSignals, g Graph, nodeName []string) int {
+	// *taskCnt += len(nodeName)
+	taskCnt := 0
+	for _, v := range nodeName {
+		n, exists := g[v]
+		if exists {
+			taskCnt++
 			go func() {
-				defer func() {
-					watchTask <- struct{}{}
-				}()
-				_runNode(c, cancelFunc, u, hnodeId)
+				//这里不能panic,一定要保证节点不能panic,不然状态无法维护
+				n.Func(c, ch)
 			}()
 		}
-	}()
-	mu.Unlock()
-	for i := 0; i < cnt; i++ {
-		<-watchTask
-		go eventLoop(c, cancelFunc, u)
 	}
-	return nil
-
+	return taskCnt
 }
-func RunGraph(c context.Context, cancelFunc func(), u Graph, _startNode string) string {
-	_, exists := graph[_startNode]
-	if exists {
-		q.Add(_startNode)
-		// wg.Add(1)
-		// c, cancel := context.WithCancel(context.TODO())
-		go func() {
-			eventLoop(c, cancelFunc, u)
-			// log.Println("所有任务均执行完成，正式退出")
 
-		}()
-
-		// wg.Wait()
+func eventLoop(c context.Context, ch chan *ExitSignals, u Graph, _startNode string) string {
+	// go eventLoop(c, ch, u, _startNode)
+	signalQueue := make(chan *RunSignals, 1)
+	taskCnt := runNode(c, signalQueue, u, []string{_startNode})
+	_notice := false
+	var send = func(x *ExitSignals) {
+		if _notice {
+			return
+		}
+		_notice = true
+		ch <- x
 	}
+	for {
 
+		signal := <-signalQueue
+		if signal.Done {
+			taskCnt--
+		}
+		if signal.Err != nil {
+			send(&ExitSignals{
+				Err: signal.Err,
+				Msg: "执行节点出错，退出",
+			})
+			continue
+		}
+		if signal.Msg != "" {
+			send(&ExitSignals{
+				Err: nil,
+				Msg: signal.Msg,
+			})
+		}
+		nextChild := signal.NextNode
+		if len(nextChild) > 0 {
+			taskCnt += runNode(c, signalQueue, u, nextChild)
+		}
+		if taskCnt == 0 {
+			break
+		}
+
+	}
+	log.Println("所有节点均已退出,结束任务!!! eventLoop")
+	return ""
+}
+func RunGraph(c context.Context, ch chan *ExitSignals, u Graph, _startNode string) string {
+	go eventLoop(c, ch, u, _startNode)
 	return "NULL"
 }
 
 // var (
 // 	wg sync.WaitGroup
 // )
-var msg sync.Map
+
 var graph = Graph{
 	"start": Node{
-		Func: func(c context.Context, cancelFunc func()) string {
+		Func: func(c context.Context, ch chan *RunSignals) string {
 			// defer wg.Done()
-			msg.Store("result", "result[执行耗费时间较长的api节点,提前返回]")
-
-			cancelFunc()
+			ch <- &RunSignals{
+				Msg: "start[进入耗时操作,请提前返回]!",
+			}
+			defer func() {
+				ch <- &RunSignals{
+					Done:     true,
+					NextNode: []string{"js1", "js2"},
+				}
+			}()
 			time.Sleep(time.Second * 10)
-			q.Add("js1")
-			// q.Add("js3")
-			// wg.Add(2)
-			// next <- []string{"js2", "js3"}
 			log.Println("node1 执行结束,10秒")
 			return "ok"
 		},
-		_x: "",
+		// _x: "",
 	},
 	"js1": Node{
-		Func: func(c context.Context, cancelFunc func()) string {
-			msg.Store("result", "执行耗费时间较长的api节点,提前返回")
-
-			cancelFunc()
-			time.Sleep(time.Second * 10)
-			q.Add("js2")
-			q.Add("js3")
-			// wg.Add(2)
-			// next <- []string{"js2", "js3"}
-			log.Println("node1 执行结束,10秒")
+		Func: func(c context.Context, ch chan *RunSignals) string {
+			// defer wg.Done()
+			defer func() {
+				ch <- &RunSignals{Done: true}
+			}()
+			time.Sleep(time.Second * 1)
+			log.Println("js1 执行结束,10秒")
 			return "ok"
 		},
 		_x: "",
 	},
 	"js2": Node{
-		Func: func(c context.Context, cancelFunc func()) string {
+		Func: func(c context.Context, ch chan *RunSignals) string {
 			// defer wg.Done()
-			// 执行耗时操作
-			time.Sleep(time.Second * 7)
-			log.Println("node2 执行结束, 8秒")
+			defer func() {
+				ch <- &RunSignals{
+					Done:     true,
+					NextNode: []string{"js3"},
+				}
+			}()
+			time.Sleep(time.Second * 3)
+			log.Println("js2 执行结束,3秒,最后一节点，js3")
 			return "ok"
 		},
 		_x: "",
 	},
 	"js3": Node{
-		Func: func(c context.Context, cancelFunc func()) string {
+		Func: func(c context.Context, ch chan *RunSignals) string {
 			// defer wg.Done()
-			log.Println("node3 执行结束")
+			defer func() {
+				ch <- &RunSignals{Done: true}
+			}()
+			log.Println("js3 执行结束,")
 			return "ok"
 		},
 		_x: "",
@@ -151,19 +162,14 @@ func main() {
 	log.Println("hello-world")
 	// msgs := make(chan string, 1)
 	go func() { //模拟一次 http请求
-		c, cancel := context.WithCancel(context.TODO())
-		RunGraph(c, cancel, graph, "start")
-
+		// c, cancel := context.WithCancel(context.TODO())
+		ch := make(chan *ExitSignals, 1)
+		RunGraph(context.TODO(), ch, graph, "start")
 		select {
-		case <-c.Done():
-			// return "node ok"
-			msg.Range(func(k, v interface{}) bool {
-				log.Println(k, "msg get := ", v)
-				return true
-			})
-		case <-time.After(3 * time.Second):
-			// return "运行超时"
-			log.Println("!!@@@运行超时")
+		case msg := <-ch:
+			log.Printf("请求响应 %#v", msg)
+		case <-time.After(time.Second * 8):
+			log.Println("请求超时！！！")
 		}
 	}()
 	// log.Println(<-msgs)
