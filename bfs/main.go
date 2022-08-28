@@ -60,7 +60,7 @@ func eventLoop(c context.Context, ch chan *ExitSignals, u Graph, _startNode stri
 		_notice = true
 		ch <- x
 	}
-	for {
+	for taskCnt > 0 {
 
 		signal := <-signalQueue
 		if signal.Done {
@@ -84,9 +84,9 @@ func eventLoop(c context.Context, ch chan *ExitSignals, u Graph, _startNode stri
 		if len(nextChild) > 0 {
 			taskCnt += runNode(c, signalQueue, u, nextChild)
 		}
-		if taskCnt == 0 {
-			break
-		}
+		// if taskCnt == 0 {
+		// 	break
+		// }
 
 	}
 	log.Println("所有节点均已退出,结束任务!!! eventLoop")
